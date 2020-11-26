@@ -1,5 +1,7 @@
-./data/
+data/
 .ipynb_checkpoints
 __pycache__/
 .DS_Store
 *.pyc
+*.h5
+*.csv
