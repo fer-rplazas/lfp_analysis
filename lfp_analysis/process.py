@@ -1,8 +1,9 @@
-
 import numpy as np
 import pandas as pd
 import h5py
 import mne
+from scipy.fftpack import dct
+from librosa import power_to_db
 from librosa.util import frame
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -21,7 +22,8 @@ class TfTransformer:
         self.LFPs = data
 
     @classmethod
-    def from_importer(cls, signal_bundle): return cls(signal_bundle.data)
+    def from_importer(cls, signal_bundle):
+        return cls(signal_bundle.data)
 
     def TF(self):
         self.power = mne.time_frequency.tfr_array_morlet(
@@ -83,3 +85,80 @@ def bl_correct(X):
 
 def clip(X, std_factor=7):
     return Normalize(vmin=-std_factor, vmax=std_factor, clip=True)(X)
+
+
+def to_mfcc(S, axis=1):
+
+    return dct(power_to_db(S), axis=axis, type=2)
+
+
+def rwt_coefficients(f, fs=2, order=6):
+    """Recursive wavelet transform filter coefficients at a given frequency.
+
+    Following J. Ren 2010, 2011
+
+    Args:
+        f (number): Peak frequency
+        fs (int, optional): Sampling frequency. Defaults to 2.
+        order (int, optional): Order of the filter. Defaults to 6.
+
+    Raises:
+        ValueError: only `order=3` and `order=6` are implemented
+
+    Returns:
+        tuple: b,a (b and a lists of rwt filter coefficients)
+    """
+
+    #  normalized frequency and phasor
+    w = f / fs
+    sig = 2 * np.pi / np.sqrt(3)
+    wo = 2 * np.pi
+    alpha = np.exp(-w * (sig - 1j * wo))
+
+    # array of coefficient
+    if order == 3:
+        # lambda
+        L = [[-1 / 2, 1 / 2, -1 / 3], [1 / 3, 0, -4 / 3], [-1 / 2, -1 / 2, -1 / 3]]
+        # beta
+        beta = [-4, 6, -4, 1]
+    elif order == 6:
+        # lambda
+        L = [
+            [0, 0, 0, 1 / 3, -1 / 6, 1 / 15],
+            [0, 0, 0, 2 / 3, -5 / 3, 26 / 15],
+            [0, 0, 0, -6 / 3, 0, 22 / 5],
+            [0, 0, 0, 2 / 3, 5 / 3, 26 / 15],
+            [0, 0, 0, 1 / 3, 1 / 6, 1 / 15],
+        ]
+        # beta
+        beta = [-6, 15, -20, 15, -6, 1]
+    else:
+        raise ValueError("'order' of the filter must be either 3 or 6")
+
+    # numerator
+    b = [
+        np.sqrt(f)
+        / fs
+        * alpha ** (i + 1)
+        * sum([Lj * (sig * w) ** (j + 1) for j, Lj in enumerate(Li)])
+        for i, Li in enumerate(L)
+    ]
+    b += [0 + 0j, 0 + 0j]
+    # denominator
+    a = [1 + 0j] + [bi * alpha ** (i + 1) for i, bi in enumerate(beta)]
+    return np.array(b), np.array(a)
+
+
+def rwt_filterbank(freqs, fs=2048, order=6):
+
+    n_freqs = len(freqs) if isinstance(freqs, list) else freqs.size
+
+    b_s, a_s = (
+        np.zeros((n_freqs, order + 1), dtype=np.complex_),
+        np.zeros((n_freqs, order + 1), dtype=np.complex_),
+    )
+
+    for ii, freq in enumerate(freqs):
+        b_s[ii,], a_s[ii,] = rwt_coefficients(freq, fs, order)
+
+    return b_s, a_s

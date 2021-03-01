@@ -1,4 +1,3 @@
-
 # __all__ = ['SmrImporter', 'SignalBundle', 'AccData',
 #            'LFPData', 'TfTransformer', 'AxisApplier',
 #            'zscore', 'bl_correct', 'clip']
@@ -24,19 +23,14 @@ from matplotlib.colors import Normalize
 
 
 class SmrImporter:
-    """Reads signals and metadata (sampling frequency ``fs``, channel names ``ch_names``)from SMR file
-
-    """
+    """Reads signals and metadata (sampling frequency ``fs``, channel names ``ch_names``)from SMR file"""
 
     def __init__(self, fname):
         analog_signal = (
-            Spike2IO(filename=str(fname)).read()[
-                0].segments[0].analogsignals[0]
+            Spike2IO(filename=str(fname)).read()[0].segments[0].analogsignals[0]
         )
 
-        self.ch_names = np.vectorize(lambda x: x.decode("utf-8"))(
-            analog_signal.channel_index.channel_names
-        ).tolist()
+        self.ch_names = analog_signal.array_annotations["channel_names"].tolist()
 
         self.ch_dict = {name: i for i, name in enumerate(self.ch_names)}
 
@@ -50,9 +44,7 @@ class SmrImporter:
 
 
 class SignalBundle:
-    """Superclass to represent bundles of signals that are often grouped together (e.g. bipolar LFPs, etc.)
-
-    """
+    """Superclass to represent bundles of signals that are often grouped together (e.g. bipolar LFPs, etc.)"""
 
     def __init__(self, data, names, fs=2048):
         self.names = names
@@ -89,13 +81,13 @@ class SignalBundle:
         self.data = np.apply_along_axis(f, -1, self.data, **kwargs)
         return self
 
-    def limit(self, plot=False, **kwargs):
+    def limit(self, plot=False, figsize=(13, 6), **kwargs):
 
         if plot:  # Plot before limiting
             n_chan = len(self.names)
             time = self.time()
 
-            fig, ax = plt.subplots(n_chan, 1, sharex=True, figsize=(13, 6))
+            fig, ax = plt.subplots(n_chan, 1, sharex=True, figsize=figsize)
             ax = ax.flatten() if n_chan > 1 else [ax]
 
             for i in range(n_chan):
@@ -131,22 +123,31 @@ class SignalBundle:
         else:
             return np.linspace(0, self.data.shape[0] / self.fs, self.data.shape[0])
 
+    def plot(self, figsize=(13, 6)):
+        fix, ax = plt.subplots(self.data.shape[0], 1, figsize=figsize, sharex=True)
+
+        for i in range(self.data.shape[0]):
+            ax[i].plot(self.time(), self.data[i])
+            ax[i].set_title(self.names[i])
+
 
 class AccData(SignalBundle):
-    """Accelerometer SignalBundle
-    """
+    """Accelerometer SignalBundle"""
+
     @classmethod
     def from_importer(
-        cls, importer, acc_names=[
-            "Aclx", "Acly", "Aclz", "Acrx", "Acry", "Acrz"]
+        cls, importer, acc_names=["Aclx", "Acly", "Aclz", "Acrx", "Acry", "Acrz"]
     ):
         data = importer.data[[importer.ch_dict[name] for name in acc_names], :]
         return cls(data, acc_names, importer.fs)
 
     def to_magnitude(self):
         if self.data.shape[1] == 6:
-            self.data = np.linalg.norm(self.data[:3, ], axis=0) + np.linalg.norm(
-                self.data[3:, ], axis=0
+            self.data = np.linalg.norm(self.data[:3,], axis=0) + np.linalg.norm(
+                self.data[
+                    3:,
+                ],
+                axis=0,
             )
         else:
             self.data = np.linalg.norm(self.data, axis=0)
@@ -155,7 +156,23 @@ class AccData(SignalBundle):
 
         return self
 
-    def to_label(self, percentile=80, plot=True):
+    def to_label(self, smoothing=0.250, percentile=75, plot=True, figsize=(13, 5)):
+        """Generates binary label (movement vs. rest) from accelererometer data by
+            1. Uniformally smoothing acc data with `smoothing` seconds
+            2. Thresholding according to `percentile`
+
+        Args:
+            smoothing (float, optional): Width of smoothing window in seconds. Defaults to 0.250.
+            percentile (int, optional): Percentile of (smoothed signal) used to compute threshold. Defaults to 75.
+            plot (bool, optional): Flag indicating whether to generate plot. Defaults to True.
+            figsize (tuple, optional): figsize, only used when `plot = True`. Defaults to (13, 5).
+
+        Raises:
+           RuntimeError: Accelerometer labels have to be computed from single-channel signal. Please call .to_magnitude() method to get single accelerometer channel.
+
+        Returns:
+            AccData: Object of class AccData.
+        """
 
         if not self.highpassed:
             _ = self.highpass()
@@ -165,7 +182,7 @@ class AccData(SignalBundle):
                 "Accelerometer labels have to be computed from single-channel signal. Please call .to_magnitude() method to get single accelerometer channel."
             )
 
-        smoothed = uniform_filter1d(self.data, size=int(self.fs // 32))
+        smoothed = uniform_filter1d(self.data, size=int(smoothing * self.fs))
 
         thresh = np.percentile(smoothed, percentile)
         self.label = (np.abs(smoothed) > thresh).astype(np.float)
@@ -176,19 +193,19 @@ class AccData(SignalBundle):
         self.label = (label_smoothed > 0.5).astype(np.float)
 
         if plot:
-            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(13, 5))
+            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=figsize)
 
             ax1.plot(self.time(), smoothed)
             ax1.plot(self.time(), self.label * thresh * 5)
+            ax1.set_title("Smoothed + label")
 
             ax2.plot(self.time(), self.data)
-
+            ax2.set_title("Raw data")
         return self
 
 
 class LFPData(SignalBundle):
-    """LFP data
-    """
+    """LFP data"""
 
     @classmethod
     def from_importer(cls, importer, names):
@@ -202,11 +219,11 @@ class LFPData(SignalBundle):
 
 
 def limiter(x, method="std", percentiles=(0.1, 99.99), std_factor=5, values=None):
-    """Limits 1-d signal x using one of the following methods: 
+    """Limits 1-d signal x using one of the following methods:
 
-        - "std" limits signal with values: (-std_factor * x.std(), std_factor * x.std())
-        - "values" limits signal with values specified by user in tuple values
-        - "percentile" limits signal according to percentiles specified in tuple percentiles        
+    - "std" limits signal with values: (-std_factor * x.std(), std_factor * x.std())
+    - "values" limits signal with values specified by user in tuple values
+    - "percentile" limits signal according to percentiles specified in tuple percentiles
 
     """
 

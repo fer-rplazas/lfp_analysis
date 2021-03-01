@@ -1,11 +1,15 @@
-
 import numpy as np
 import pandas as pd
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from imblearn.under_sampling import RandomUnderSampler
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from sklearn.metrics import (
+    classification_report,
+    accuracy_score,
+    confusion_matrix,
+    roc_auc_score,
+)
 
 
 class BLClassifier:
@@ -31,8 +35,7 @@ class BLClassifier:
 
         self.freq_idx = np.array(
             [
-                [np.where(frequencies == el[0]),
-                 np.where(frequencies == el[1])]
+                [np.where(frequencies == el[0]), np.where(frequencies == el[1])]
                 for el in self.freq_ranges
             ]
         ).squeeze()
@@ -40,12 +43,10 @@ class BLClassifier:
     def get_feat_mats(self):
 
         self.X_train, self.y_train = self.get_feats(
-            self.df_data[self.df_data["is_valid"] ==
-                         False].drop(columns=["is_valid"]),
+            self.df_data[self.df_data["is_valid"] == False].drop(columns=["is_valid"]),
         )
         self.X_valid, self.y_valid = self.get_feats(
-            self.df_data[self.df_data["is_valid"]
-                         == True].drop(columns=["is_valid"]),
+            self.df_data[self.df_data["is_valid"] == True].drop(columns=["is_valid"]),
         )
 
         return self
@@ -53,19 +54,18 @@ class BLClassifier:
     def get_feats(self, df_labels):
 
         feat_mat = (
-            np.zeros(
-                (len(df_labels), self.data.shape[0] * len(self.freq_idx))) * np.nan
+            np.zeros((len(df_labels), self.data.shape[0] * len(self.freq_idx))) * np.nan
         )
         label_mat = df_labels["label"].to_numpy()
 
         for ii, row in df_labels.reset_index().iterrows():
-            this_data = self.data[:, :, row["id_start"]: row["id_end"]]
+            this_data = self.data[:, :, row["id_start"] : row["id_end"]]
 
             for ch in range(self.data.shape[0]):
 
                 for kk, freq_lims in enumerate(self.freq_idx):
                     feat_mat[ii, (ch * len(self.freq_ranges)) + kk] = np.mean(
-                        this_data[ch, freq_lims[0]: freq_lims[1]]
+                        this_data[ch, freq_lims[0] : freq_lims[1]]
                     )
 
         return pd.DataFrame(feat_mat, columns=self.feat_names), label_mat
@@ -93,11 +93,12 @@ class BLClassifier:
         print("On Train: ")
         print(classification_report(self.y_train, y_pred_train))
         print(confusion_matrix(self.y_train, y_pred_train))
+        print(f"AUC: {roc_auc_score(self.y_train, y_pred_train)}")
         print("")
         print("On Valid:")
         print(classification_report(self.y_valid, y_pred))
         print(confusion_matrix(self.y_valid, y_pred))
-
+        print(f"AUC: {roc_auc_score(self.y_valid,y_pred)}")
         if metric == "accuracy":
             return (
                 accuracy_score(self.y_train, y_pred_train),
