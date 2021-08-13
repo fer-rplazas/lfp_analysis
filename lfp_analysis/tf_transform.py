@@ -1,20 +1,17 @@
+from textwrap import dedent
+from typing import Optional
+
+import mne
 import numpy as np
 import pandas as pd
-import h5py
-import mne
-from scipy.fftpack import dct
 from librosa import power_to_db
-from librosa.util import frame
-import matplotlib.pyplot as plt
-from matplotlib import cm
-from matplotlib.colors import Normalize
 
-from pathlib import Path
+from matplotlib.colors import Normalize
+from scipy.fftpack import dct
 
 
 class TfTransformer:
-    """Time-frequency transformer
-    """
+    """Time-frequency transformer"""
 
     def __init__(self, data):
         self.frequencies = np.arange(2, 101, 1)
@@ -33,6 +30,7 @@ class TfTransformer:
             decim=1,
             output="power",
             sfreq=2048,
+            n_jobs=1,
         ).squeeze()
 
         return self
@@ -47,13 +45,6 @@ class TfTransformer:
         mean = np.nanmean(self.power, axis=-1, keepdims=True)
         std = np.nanstd(self.power, axis=-1, keepdims=True)
         self.power = (self.power - mean) / std
-
-        return self
-
-    def range_correct(self):
-        self.range_corrected = (
-            self.limited / self.limited.max(-1, keepdims=True) * 2 - 1
-        )
 
         return self
 
@@ -159,6 +150,13 @@ def rwt_filterbank(freqs, fs=2048, order=6):
     )
 
     for ii, freq in enumerate(freqs):
-        b_s[ii,], a_s[ii,] = rwt_coefficients(freq, fs, order)
+        (
+            b_s[
+                ii,
+            ],
+            a_s[
+                ii,
+            ],
+        ) = rwt_coefficients(freq, fs, order)
 
     return b_s, a_s

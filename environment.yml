@@ -1,0 +1,35 @@
+channels:
+  - conda-forge
+  - pytorch
+  - fastai
+  - defaults
+dependencies:
+  - matplotlib
+  - seaborn
+  - python-neo
+  - tqdm
+  - pytorch
+  - torchvision
+  - torchaudio
+  - cpuonly
+  - scipy
+  - spacy
+  - vtk
+  - librosa
+  - ipympl
+  - pillow
+  - numba
+  - scikit-learn
+  - joblib
+  - pandas
+  - numpy
+  - black
+  - imbalanced-learn
+  - mne
+  - h5py
+  - jupyter
+  - jupyterlab
+  - python
+  - icecream
+  - fastai
+  - pip

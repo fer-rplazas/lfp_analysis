@@ -1,11 +1,20 @@
 
 # Ignore data files:
 data/
+wandb/
+nbs/wandb/
+nbs/.neptune
+.vscode/
+.virtual_documents
 
 # Ignore data by extension:
 *.pyc
 *.h5
 *.csv
+*.png
+*.log
+*.html
+*.json
 
 # Python & Mac stuff:
 .ipynb_checkpoints

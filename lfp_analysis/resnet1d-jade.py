@@ -10,9 +10,17 @@ from fastai.vision.all import nn, ConvLayer, F
 import wandb
 
 from .score import Scorer, CnnScores
-
+from dataclasses import dataclass
 
 DATA_PATH = Path("./../data")
+
+
+@dataclass
+class SilenceRecorder(Callback):
+    learn: Learner
+
+    def __post_init__(self):
+        self.learn.recorder.silent = True
 
 
 def _conv_block1d(ni, nf, stride):
@@ -43,7 +51,7 @@ def _resnet_stem1d(*sizes):
 class ResNet1d(nn.Sequential):
     def __init__(self, n_in, n_out, layers, expansion=1):
         stem = _resnet_stem1d(n_in, 32, 32, 64)
-        self.block_szs = [64, 64, 128, 128, 256, 256, 512, 512]
+        self.block_szs = [64, 64, 128, 256, 256, 512, 512]
         for i in range(1, len(self.block_szs)):
             self.block_szs[i] *= expansion
         blocks = [self._make_layer(*o) for o in enumerate(layers)]
@@ -52,6 +60,7 @@ class ResNet1d(nn.Sequential):
             *blocks,
             nn.AdaptiveAvgPool1d(1),
             Flatten(),
+            nn.Dropout(0.3),
             nn.Linear(self.block_szs[len(layers)], n_out),
             Flatten(),
         )
@@ -59,6 +68,7 @@ class ResNet1d(nn.Sequential):
     def _make_layer(self, idx, n_layers):
         stride = 1 if idx == 0 else 2
         ch_in, ch_out = self.block_szs[idx : idx + 2]
+        # print(f"{ch_in,ch_out}")
         return nn.Sequential(
             *[
                 ResBlock1d(ch_in if i == 0 else ch_out, ch_out, stride if i == 0 else 1)
@@ -149,10 +159,12 @@ class Trainer:
 
 
 class Trainer1d(Trainer):
-    def __init__(self, layers=[1, 1], wd=0.025, log_wandb=True, experiment=None):
+    def __init__(
+        self, layers=[1, 1], wd=0.025, log_wandb=True, silent=False, experiment=None
+    ):
 
         self.layers, self.wd = layers, wd
-
+        self.silent = silent
         super().__init__(log_wandb, experiment)
 
     def prepare_dls(self, dataset, windower, bs=256):
@@ -173,11 +185,11 @@ class Trainer1d(Trainer):
 
         self.dataset, self.windower = dataset, windower
 
-        self.data_df = self.windower.data_decim_df
+        self.data_df = self.windower.df
 
         def get_x(row):
             return torch.tensor(
-                dataset.LFP_decim[:, int(row["id_start"]) : int(row["id_end"])].copy()
+                dataset.LFP.data[:, int(row["id_start"]) : int(row["id_end"])].copy()
             ).float()
 
         def get_y(row):
@@ -193,9 +205,12 @@ class Trainer1d(Trainer):
         def LFP_block1d():
             return TransformBlock(
                 batch_tfms=(
-                    LFPNormalizer1d(get_norm_stats(dataset.LFP_decim, train_end))
+                    LFPNormalizer1d(get_norm_stats(dataset.LFP.data, train_end))
                 )
             )
+
+        # def LFP_block1d():
+        #     return TransformBlock(batch_tfms=())
 
         self.dblock = DataBlock(
             blocks=(LFP_block1d, CategoryBlock),
@@ -212,10 +227,13 @@ class Trainer1d(Trainer):
 
         cbs = [WandbCallback()] if self.log_wandb else []
 
+        # if self.silent:
+        #     cbs.append(SilenceRecorder)
+
         dls = self.dls if dls is None else dls
         wd = self.wd if wd is None else wd
-
-        self.resnet = ResNet1d(self.dataset.LFP_decim.shape[0], 2, self.layers).cuda()
+        loss = LabelSmoothingCrossEntropy(eps=0.2)
+        self.resnet = ResNet1d(self.dataset.LFP.data.shape[0], 2, self.layers).cuda()
         if torch.cuda.is_available():
             self.resnet = self.resnet.cuda()
 
@@ -225,17 +243,22 @@ class Trainer1d(Trainer):
             metrics=[
                 accuracy,
             ],
-            loss_func=F.cross_entropy,
+            loss_func=loss,
             cbs=cbs,
             wd=float(wd),
         )
         self.learn.recorder.train_metrics = True
+        # self.learn.recorder.silent = True
 
         return self
 
     def train(self, n_epochs=45, lr_div=1):
 
         self.learn.fit_one_cycle(n_epochs, lr_div)
+        self.learn.fit_one_cycle(n_epochs, lr_div / 2)
+        self.learn.fit_one_cycle(n_epochs, lr_div / 4)
+        self.learn.fit_one_cycle(n_epochs, lr_div / 8)
+
         self.learn.add_cb(EarlyStoppingCallback(min_delta=0.001, patience=3))
 
         # self.learn.fit_one_cycle(14, 10e-4)
